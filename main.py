@@ -1,37 +1,125 @@
 import discord
 from discord.ext import commands
-from discord.ui import View, Button
+from discord.ui import View, Button, Select
+import os
+
+# ====== USTAWIENIA ======
+EVENT_NAME = "Dilerzy"
+EVENT_TIME = "10:45"
+LIMIT = 99
+ZARZAD_ROLE = "Zarząd"
+# =======================
 
 intents = discord.Intents.default()
 intents.message_content = True
+intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 zapisani = set()
 wybrani = set()
-LIMIT = 99
+event_message = None
 
+
+# ====== EMBED ======
 def create_embed():
-    tekst = ""
+    text = ""
     for uid in zapisani:
         if uid in wybrani:
-            tekst += f"<@{uid}> | ✅ Wybrany\n"
+            text += f"<@{uid}> | ✅ Wybrany\n"
         else:
-            tekst += f"<@{uid}> | 📝 Zapisany\n"
+            text += f"<@{uid}> | 📝 Zapisany\n"
 
-    if not tekst:
-        tekst = "Brak zapisanych."
+    if not text:
+        text = "Brak zapisanych."
 
     embed = discord.Embed(
-        title="📅 Event zapis",
+        title=f"📅 Event: {EVENT_NAME}",
         color=0x2F3136
     )
-    embed.add_field(name="Użytkownik | Status", value=tekst, inline=False)
-    embed.add_field(name="Godzina", value="10:45", inline=False)
+    embed.add_field(name="Użytkownik | Status", value=text, inline=False)
+    embed.add_field(name="Godzina", value=EVENT_TIME, inline=False)
     embed.add_field(name="Wybrani", value=f"{len(wybrani)}/{LIMIT}", inline=False)
+
     return embed
 
-class Zapisy(View):
+
+# ====== PANEL ADMINA ======
+class AdminView(View):
+    def __init__(self, guild):
+        super().__init__(timeout=60)
+
+        zapisani_options = [
+            discord.SelectOption(
+                label=guild.get_member(uid).display_name,
+                value=str(uid)
+            )
+            for uid in zapisani
+            if guild.get_member(uid)
+        ]
+
+        wybrani_options = [
+            discord.SelectOption(
+                label=guild.get_member(uid).display_name,
+                value=str(uid)
+            )
+            for uid in wybrani
+            if guild.get_member(uid)
+        ]
+
+        self.add_item(WybierzSelect(zapisani_options))
+        self.add_item(CofnijSelect(wybrani_options))
+
+
+class WybierzSelect(Select):
+    def __init__(self, options):
+        super().__init__(
+            placeholder="✅ Wybierz użytkownika",
+            options=options[:25],
+            min_values=1,
+            max_values=1
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        uid = int(self.values[0])
+        wybrani.add(uid)
+
+        if event_message:
+            await event_message.edit(embed=create_embed(), view=MainView())
+
+        await interaction.response.send_message(
+            f"✅ <@{uid}> został wybrany",
+            ephemeral=True
+        )
+
+
+class CofnijSelect(Select):
+    def __init__(self, options):
+        super().__init__(
+            placeholder="❌ Cofnij wybranie",
+            options=options[:25],
+            min_values=1,
+            max_values=1
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        uid = int(self.values[0])
+        wybrani.discard(uid)
+
+        if event_message:
+            await event_message.edit(embed=create_embed(), view=MainView())
+
+        await interaction.response.send_message(
+            f"❌ Cofnięto wybranie <@{uid}>",
+            ephemeral=True
+        )
+
+
+# ====== GŁÓWNE PRZYCISKI ======
+class MainView(View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
     @discord.ui.button(label="Wpisz się / Wypisz się", style=discord.ButtonStyle.primary)
     async def toggle(self, interaction: discord.Interaction, button: Button):
         uid = interaction.user.id
@@ -42,25 +130,51 @@ class Zapisy(View):
         else:
             zapisani.add(uid)
 
-        await interaction.response.edit_message(embed=create_embed(), view=self)
+        if event_message:
+            await event_message.edit(embed=create_embed(), view=self)
 
+        await interaction.response.defer()
+
+    @discord.ui.button(label="Administracyjne", style=discord.ButtonStyle.secondary)
+    async def admin(self, interaction: discord.Interaction, button: Button):
+        if not discord.utils.get(interaction.user.roles, name=ZARZAD_ROLE):
+            await interaction.response.send_message(
+                "❌ Nie masz uprawnień",
+                ephemeral=True
+            )
+            return
+
+        if not zapisani:
+            await interaction.response.send_message(
+                "Brak zapisanych użytkowników.",
+                ephemeral=True
+            )
+            return
+
+        await interaction.response.send_message(
+            "🔧 Panel administracyjny",
+            view=AdminView(interaction.guild),
+            ephemeral=True
+        )
+
+
+# ====== KOMENDA STARTU EVENTU ======
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def event(ctx):
-    await ctx.send(embed=create_embed(), view=Zapisy())
+    global event_message
+    zapisani.clear()
+    wybrani.clear()
 
-@bot.command()
-@commands.has_role("Zarząd")
-async def wybierz(ctx, member: discord.Member):
-    if member.id not in zapisani:
-        await ctx.send("❌ Użytkownik nie jest zapisany.")
-        return
-    wybrani.add(member.id)
-    await ctx.send(f"✅ {member.mention} został wybrany.")
+    event_message = await ctx.send(
+        embed=create_embed(),
+        view=MainView()
+    )
+
 
 @bot.event
 async def on_ready():
     print("Bot działa 24/7")
 
-import os
+
 bot.run(os.getenv("TOKEN"))
