@@ -24,6 +24,7 @@ event_message = None
 # ====== EMBED ======
 def create_embed():
     text = ""
+
     for uid in zapisani:
         if uid in wybrani:
             text += f"<@{uid}> | ✅ Wybrany\n"
@@ -49,26 +50,31 @@ class AdminView(View):
     def __init__(self, guild):
         super().__init__(timeout=60)
 
-        zapisani_options = [
-            discord.SelectOption(
-                label=guild.get_member(uid).display_name,
-                value=str(uid)
-            )
-            for uid in zapisani
-            if guild.get_member(uid)
-        ]
+        zapisani_opts = []
+        wybrani_opts = []
 
-        wybrani_options = [
-            discord.SelectOption(
-                label=guild.get_member(uid).display_name,
-                value=str(uid)
-            )
-            for uid in wybrani
-            if guild.get_member(uid)
-        ]
+        for uid in zapisani:
+            member = guild.get_member(uid)
+            if member:
+                zapisani_opts.append(
+                    discord.SelectOption(
+                        label=member.display_name,
+                        value=str(uid)
+                    )
+                )
 
-        self.add_item(WybierzSelect(zapisani_options))
-        self.add_item(CofnijSelect(wybrani_options))
+        for uid in wybrani:
+            member = guild.get_member(uid)
+            if member:
+                wybrani_opts.append(
+                    discord.SelectOption(
+                        label=member.display_name,
+                        value=str(uid)
+                    )
+                )
+
+        self.add_item(WybierzSelect(zapisani_opts))
+        self.add_item(CofnijSelect(wybrani_opts))
 
 
 class WybierzSelect(Select):
@@ -115,7 +121,7 @@ class CofnijSelect(Select):
         )
 
 
-# ====== GŁÓWNE PRZYCISKI ======
+# ====== GŁÓWNY VIEW ======
 class MainView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -137,7 +143,11 @@ class MainView(View):
 
     @discord.ui.button(label="Administracyjne", style=discord.ButtonStyle.secondary)
     async def admin(self, interaction: discord.Interaction, button: Button):
-        if not discord.utils.get(interaction.user.roles, name=ZARZAD_ROLE):
+
+        # 🔥 CACHE-SAFE sprawdzanie roli
+        member = await interaction.guild.fetch_member(interaction.user.id)
+
+        if not discord.utils.get(member.roles, name=ZARZAD_ROLE):
             await interaction.response.send_message(
                 "❌ Nie masz uprawnień",
                 ephemeral=True
@@ -158,7 +168,7 @@ class MainView(View):
         )
 
 
-# ====== KOMENDA STARTU EVENTU ======
+# ====== START EVENTU ======
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def event(ctx):
@@ -174,7 +184,7 @@ async def event(ctx):
 
 @bot.event
 async def on_ready():
-    print("Bot działa 24/7")
+    print("Bot działa 24/7 (cache-safe)")
 
 
 bot.run(os.getenv("TOKEN"))
